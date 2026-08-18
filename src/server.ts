@@ -1,4 +1,5 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import { createRequire } from 'node:module';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
@@ -12,15 +13,35 @@ import { registerRoutes } from './routes/register.js';
 import { scanRoutes } from './routes/scan.js';
 import { adminRoutes } from './routes/admin.js';
 
+/**
+ * Pretty logs in development, newline-delimited JSON in production.
+ *
+ * pino-pretty is a devDependency and deploy platforms install without
+ * devDependencies, so its presence is checked rather than assumed. Without this,
+ * running a production-only install with NODE_ENV != production dies inside pino
+ * with "unable to determine transport target for pino-pretty" — a long way from
+ * the actual cause.
+ */
+function loggerTransport(): Record<string, unknown> {
+  if (env.isProduction) return {};
+  try {
+    createRequire(import.meta.url).resolve('pino-pretty');
+  } catch {
+    return {};
+  }
+  return {
+    transport: {
+      target: 'pino-pretty',
+      options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
+    },
+  };
+}
+
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
-      // Pretty logs in development only; production emits newline-delimited JSON
-      // so a log shipper can parse it.
-      ...(env.isProduction
-        ? {}
-        : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } }),
+      ...loggerTransport(),
       base: { pid: process.pid },
     },
     // Behind a load balancer the client IP arrives in X-Forwarded-For; without
