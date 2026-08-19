@@ -7,7 +7,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Feature branches run the full suite too. The database tests need a MariaDB
+    # service container, which is the only place they can run when a developer
+    # has no local container runtime.
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -26,8 +29,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 is the supported floor; 22 is what the Hostinger app runs.
-        node: ['20', '22']
+        # 24 is the target. 22 stays as the floor because Hostinger has served
+        # an older Node than the app was configured for before, and that is
+        # exactly how the WebSocket crash reached production. Node 20 is gone:
+        # it went end-of-life in April 2026.
+        node: ['22', '24']
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: foodiana_test
+          MARIADB_USER: foodiana
+          MARIADB_PASSWORD: foodiana
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -46,26 +67,39 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Boots dist/index.js exactly as Hostinger will, then asserts 20
-      # behaviours that need no database.
+      # The database tests: migrations, charset round-trip, and the gate's
+      # capacity ceiling under concurrent admissions.
+      - name: Test
+        run: npm test
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
+          # env.ts validates the whole schema on import, and the tests import the
+          # db client, so the auth settings have to be present here too.
+          JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
+          ADMIN_PASSWORD: ci-only-admin-password
+          LOG_LEVEL: silent
+
+      # Boots dist/index.js exactly as Hostinger will, then asserts 28
+      # behaviours end to end against the MariaDB service container.
       - name: Smoke test
         run: node scripts/smoke-test.mjs
         env:
-          SUPABASE_URL: https://ci-placeholder.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
           JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
           ADMIN_PASSWORD: ci-only-admin-password
           AGENT_PASSWORD: ci-only-agent-password
           CORS_ORIGINS: https://ci.example
           LOG_LEVEL: silent
-
-      # supabase-js builds a RealtimeClient inside createClient, which resolves a
-      # WebSocket constructor at construction time. On a runtime with no global
-      # WebSocket that threw on import and the API never listened — it reached
-      # production once. This asserts the invariant directly, on every Node
-      # version, rather than relying on the matrix to happen to cover it.
-      - name: Boots without a global WebSocket
-        run: npm run check:no-websocket
 
   deploy-simulation:
     name: Hostinger install simulation
@@ -75,12 +109,27 @@ jobs:
     # `sh: tsc: command not found` reached a real deploy: typescript was a
     # devDependency, so it was never on disk when the build ran. This job
     # reproduces that install so the same mistake fails here instead of there.
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: foodiana_test
+          MARIADB_USER: foodiana
+          MARIADB_PASSWORD: foodiana
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install without devDependencies, then build
         run: |
@@ -90,8 +139,12 @@ jobs:
 
       - name: Start the way the Fastify preset does (npm start)
         env:
-          SUPABASE_URL: https://ci-placeholder.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
           JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
           ADMIN_PASSWORD: ci-only-admin-password
           NODE_ENV: production

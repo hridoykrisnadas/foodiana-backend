@@ -4,12 +4,16 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import { env } from './lib/env.js';
 import { ApiError } from './lib/errors.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { publicRoutes } from './routes/public.js';
 import { registerRoutes } from './routes/register.js';
+import { uploadRoutes, MAX_UPLOAD_BYTES } from './routes/uploads.js';
+import { ensureUploadDir, uploadDir } from './lib/uploads.js';
 import { rootRoutes } from './routes/root.js';
 import { scanRoutes } from './routes/scan.js';
 import { adminRoutes } from './routes/admin.js';
@@ -71,6 +75,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
+  await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
+
   await app.register(rateLimit, {
     max: env.RATE_LIMIT_MAX,
     timeWindow: env.RATE_LIMIT_WINDOW,
@@ -118,6 +124,21 @@ export async function buildServer(): Promise<FastifyInstance> {
     }),
   );
 
+  // Logging the resolved absolute path is what makes a misconfigured UPLOAD_DIR
+  // visible now rather than after the next deploy has discarded every image.
+  await ensureUploadDir();
+  app.log.info({ uploadDir }, 'serving uploads from this absolute path');
+
+  await app.register(fastifyStatic, {
+    root: uploadDir,
+    prefix: '/uploads/',
+    index: false,
+    list: false,
+    // Filenames are random and immutable, so they can be cached hard.
+    cacheControl: true,
+    maxAge: '30d',
+  });
+
   await app.register(rootRoutes);
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: '/api/auth' });
@@ -125,6 +146,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(registerRoutes, { prefix: '/api/register' });
   await app.register(scanRoutes, { prefix: '/api/scan' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
+  await app.register(uploadRoutes, { prefix: '/api/admin/uploads' });
 
   return app;
 }

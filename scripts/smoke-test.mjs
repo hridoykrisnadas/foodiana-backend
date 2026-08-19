@@ -9,9 +9,9 @@
  * from the repository root — so this exercises the real entry point, not a test-only
  * wrapper.
  *
- * Endpoints that touch Postgres are expected to fail with 502 here — that is the
- * correct answer when the Supabase URL is a placeholder, and still proves the
- * route, the auth guard and the validation in front of it all ran.
+ * CI runs this against a real MariaDB service container, so endpoints that touch
+ * the database are expected to succeed and are asserted on their content, not
+ * merely on having reached the route.
  */
 
 import { spawn } from 'node:child_process';
@@ -95,9 +95,12 @@ try {
   check('GET /health returns 200', health.status === 200, `got ${health.status}`);
   check('GET /health reports a pid', typeof health.body?.pid === 'number');
 
-  // Readiness must fail loudly with placeholder credentials rather than lie.
+  // The suite now runs against a real database, so readiness must report it is
+  // reachable. Before the MariaDB move this asserted a 503, because the only
+  // thing available was placeholder Supabase credentials.
   const ready = await req('/health/ready');
-  check('GET /health/ready reports the database unreachable', ready.status === 503, `got ${ready.status}`);
+  check('GET /health/ready returns 200', ready.status === 200, `got ${ready.status}`);
+  check('GET /health/ready reports the database reachable', ready.body?.database === 'reachable', `got ${ready.body?.database}`);
 
   // --- auth -----------------------------------------------------------------
   const badLogin = await req('/api/auth/login', {
@@ -143,7 +146,13 @@ try {
     const agentOnScan = await req('/api/scan/crowd', {
       headers: { authorization: `Bearer ${agentLogin.body?.token}` },
     });
-    check('agent token can reach the gate', agentOnScan.status === 502, `got ${agentOnScan.status}`);
+    check('agent token can reach the gate', agentOnScan.status === 200, `got ${agentOnScan.status}`);
+    check(
+      'the gate returns live occupancy against the real database',
+      typeof agentOnScan.body?.crowd?.insideNow === 'number' &&
+        typeof agentOnScan.body?.crowd?.capacity === 'number',
+      JSON.stringify(agentOnScan.body?.crowd),
+    );
   }
 
   // --- validation -----------------------------------------------------------
@@ -164,6 +173,17 @@ try {
     body: JSON.stringify({ name_bn: 'Test', is_superuser: true }),
   });
   check('content CRUD rejects a non-whitelisted column', badColumn.status === 400, `got ${badColumn.status}`);
+
+  // --- uploads --------------------------------------------------------------
+  const uploadNoAuth = await req('/api/admin/uploads', { method: 'POST' });
+  check('upload rejects a missing token', uploadNoAuth.status === 401, `got ${uploadNoAuth.status}`);
+
+  const uploadNoFile = await req('/api/admin/uploads', { method: 'POST', headers: adminAuth });
+  check(
+    'upload rejects a request with no file',
+    uploadNoFile.status === 400 || uploadNoFile.status === 406,
+    `got ${uploadNoFile.status}`,
+  );
 
   // --- routing --------------------------------------------------------------
   const missing = await req('/api/does-not-exist');

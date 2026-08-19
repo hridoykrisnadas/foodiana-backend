@@ -24,8 +24,12 @@ services:
       PORT: '4000'
       TRUST_PROXY: 'true'
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set SUPABASE_SERVICE_ROLE_KEY in .env}
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_USER: ${DB_USER:-foodiana}
+      DB_PASSWORD: ${DB_PASSWORD:-foodiana}
+      DB_NAME: ${DB_NAME:-foodiana}
+      UPLOAD_DIR: /data/uploads
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
@@ -33,6 +37,14 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
       REGISTER_RATE_LIMIT_MAX: ${REGISTER_RATE_LIMIT_MAX:-10}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Uploads must outlive the container, exactly as they must outlive a deploy
+    # on Hostinger. A bind mount here would also work; the named volume keeps
+    # `docker compose down` from destroying them.
+    volumes:
+      - uploads:/data/uploads
     restart: unless-stopped
     healthcheck:
       test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4000/health']
@@ -55,3 +67,30 @@ services:
       interval: 15s
       timeout: 3s
       retries: 3
+
+  db:
+    image: mariadb:11.8
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MARIADB_DATABASE: ${DB_NAME:-foodiana}
+      MARIADB_USER: ${DB_USER:-foodiana}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-foodiana}
+    # utf8mb4 is not optional: the *_bn content columns hold Bengali, and a
+    # latin1 default corrupts them silently rather than failing.
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    ports:
+      - '${DB_PORT:-3306}:3306'
+    volumes:
+      - db-data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
+  uploads:

@@ -51,14 +51,23 @@ Verify both landed in `dependencies` (not `devDependencies`) in `package.json`.
 
 - [ ] **Step 2: Add the database settings to the env schema**
 
-In `src/lib/env.ts`, inside `envSchema`, replace the two Supabase lines:
+In `src/lib/env.ts`, inside `envSchema`, **relax** the two Supabase lines rather
+than deleting them. `src/db/supabase.ts` still reads them and is not deleted
+until Task 7, and Tasks 2 and 3 both need a compiling build to run their tests.
+Defaulting them keeps the type `string` and stops them being required, so a
+deployment can already drop the real values:
 
 ```ts
-  SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20, 'SUPABASE_SERVICE_ROLE_KEY looks too short'),
+  /**
+   * TEMPORARY, removed once src/db/supabase.ts is deleted. They are kept only so
+   * that file still compiles while the routes are ported table by table. Neither
+   * is required any more, so a deployment can already drop them.
+   */
+  SUPABASE_URL: z.string().default('https://unused.invalid'),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default('unused-during-migration'),
 ```
 
-with:
+then add, alongside them:
 
 ```ts
   DB_HOST: z.string().min(1, 'DB_HOST is required'),
@@ -1801,6 +1810,10 @@ npm uninstall @supabase/supabase-js
 git rm -r supabase/migrations
 git rm src/db/supabase.ts scripts/check-boots-without-websocket.mjs
 ```
+
+Now delete the two temporary `SUPABASE_*` entries from `envSchema` in
+`src/lib/env.ts` — nothing reads them any more. `npm run typecheck` must stay
+clean afterwards; an error here means a call site was missed.
 
 The no-websocket guard exists only to catch a supabase-js failure mode. With the dependency gone it guards nothing, so it leaves with it.
 

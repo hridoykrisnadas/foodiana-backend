@@ -3,13 +3,14 @@ import { badRequest, notFound } from './errors.js';
 /**
  * Registry of the tables the admin content CRUD endpoints may touch.
  *
- * Both the table name and every writable column are whitelisted here. The
- * service-role key bypasses RLS, so this registry is the only thing standing
- * between `PATCH /api/admin/content/:table/:id` and arbitrary writes to any
- * table in the database. Nothing outside this file may widen it.
+ * Both the table name and every writable column are whitelisted here. The API
+ * connects as a single database user with full rights to this schema, so this
+ * registry is the only thing standing between
+ * `PATCH /api/admin/content/:table/:id` and arbitrary writes to any table.
+ * Nothing outside this file may widen it.
  */
 export type ContentTable = {
-  /** Real Postgres table name. */
+  /** Real table name. */
   table: string;
   /** Columns a client is allowed to insert or update. */
   writable: readonly string[];

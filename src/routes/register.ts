@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { db, UNIQUE_VIOLATION, unwrap } from '../db/supabase.js';
+import { db, isDuplicateEntry } from '../db/client.js';
 import { env } from '../lib/env.js';
 import { badRequest, upstream } from '../lib/errors.js';
 import { parseBody } from '../lib/validate.js';
@@ -52,12 +52,11 @@ export const registerRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const body = parseBody(registrationSchema, request.body);
 
-      const tierResult = await db
-        .from('ticket_tiers')
-        .select('id, price, includes_concert, label_en, label_bn, is_active')
-        .eq('id', body.ticket_tier_id)
-        .maybeSingle();
-      const tier = unwrap(tierResult, 'load ticket tier');
+      const tier = await db
+        .selectFrom('ticket_tiers')
+        .select(['id', 'price', 'includes_concert', 'label_en', 'label_bn', 'is_active'])
+        .where('id', '=', body.ticket_tier_id)
+        .executeTakeFirst();
 
       if (!tier) throw badRequest('The selected ticket tier does not exist');
       if (!tier.is_active) throw badRequest('The selected ticket tier is no longer on sale');
@@ -66,43 +65,44 @@ export const registerRoutes: FastifyPluginAsync = async (app) => {
       // cannot hand out the same code — a collision just costs one retry.
       for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt += 1) {
         const qrCodeId = generateQrId();
-        const { data, error } = await db
-          .from('visitors')
-          .insert({
-            qr_code_id: qrCodeId,
-            name: body.name,
-            email: body.email,
-            mobile: body.mobile,
-            dob: body.dob,
-            profession: body.profession,
-            payment_status: 'Pending',
-            entry_status: false,
-            exited_status: false,
-            ticket_tier_id: tier.id,
-            ticket_price: tier.price,
-            includes_concert: tier.includes_concert,
-          })
-          .select('id, qr_code_id, name, ticket_price, includes_concert')
-          .single();
+        const id = randomUUID();
 
-        if (!error && data) {
-          request.log.info({ qrCodeId: data.qr_code_id, tierId: tier.id }, 'visitor registered');
-          return reply.code(201).send({
-            qr_code_id: data.qr_code_id,
-            name: data.name,
-            price: data.ticket_price,
-            includes_concert: data.includes_concert,
-            label_en: tier.label_en,
-            label_bn: tier.label_bn,
-          });
+        try {
+          await db
+            .insertInto('visitors')
+            .values({
+              id,
+              qr_code_id: qrCodeId,
+              name: body.name,
+              email: body.email,
+              mobile: body.mobile,
+              dob: body.dob,
+              profession: body.profession,
+              payment_status: 'Pending',
+              entry_status: false,
+              exited_status: false,
+              ticket_tier_id: tier.id,
+              ticket_price: tier.price,
+              includes_concert: tier.includes_concert,
+            })
+            .execute();
+        } catch (error) {
+          if (isDuplicateEntry(error)) {
+            request.log.warn({ attempt, qrCodeId }, 'qr code collision, retrying');
+            continue;
+          }
+          throw upstream('Registration failed', { message: (error as Error).message });
         }
 
-        if (error?.code === UNIQUE_VIOLATION) {
-          request.log.warn({ attempt, qrCodeId }, 'qr code collision, retrying');
-          continue;
-        }
-
-        throw upstream('Registration failed', { code: error?.code, message: error?.message });
+        request.log.info({ qrCodeId, tierId: tier.id }, 'visitor registered');
+        return reply.code(201).send({
+          qr_code_id: qrCodeId,
+          name: body.name,
+          price: tier.price,
+          includes_concert: tier.includes_concert,
+          label_en: tier.label_en,
+          label_bn: tier.label_bn,
+        });
       }
 
       throw upstream(
