@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { db } from '../db/supabase.js';
+import { sql } from 'kysely';
+import { db } from '../db/client.js';
 
 const startedAt = Date.now();
 
@@ -15,13 +16,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   }));
 
   app.get('/health/ready', { config: { rateLimit: false } }, async (_request, reply) => {
-    const { error } = await db.from('event_settings').select('id').eq('id', 1).maybeSingle();
-    if (error) {
+    // SELECT 1 rather than a table read: this probe reports connectivity, not
+    // schema state. Migrations run on boot, so a missing table means the process
+    // never started and cannot be observed here.
+    try {
+      await sql`SELECT 1`.execute(db);
+    } catch (error) {
       return reply.code(503).send({
         status: 'unavailable',
         pid: process.pid,
         database: 'unreachable',
-        detail: error.message,
+        detail: (error as Error).message,
       });
     }
     return { status: 'ok', pid: process.pid, database: 'reachable' };
