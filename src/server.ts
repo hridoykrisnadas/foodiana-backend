@@ -10,6 +10,7 @@ import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { publicRoutes } from './routes/public.js';
 import { registerRoutes } from './routes/register.js';
+import { rootRoutes } from './routes/root.js';
 import { scanRoutes } from './routes/scan.js';
 import { adminRoutes } from './routes/admin.js';
 
@@ -117,6 +118,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }),
   );
 
+  await app.register(rootRoutes);
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(publicRoutes, { prefix: '/api/public' });

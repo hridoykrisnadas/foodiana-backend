@@ -79,7 +79,7 @@ that origin listed in `CORS_ORIGINS` here (the default already allows
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run `dist/index.js` — exactly how Hostinger starts it |
 | `npm run typecheck` | Types only, no emit |
-| `npm run smoke` | Boot `dist/` and assert 20 behaviours needing no database |
+| `npm run smoke` | Boot `dist/` and assert 24 behaviours needing no database |
 | `npm run verify:deployment` | Check a live deployment from the outside |
 
 ## Running as a cluster
@@ -99,10 +99,8 @@ here. Add capacity by adding instances.
 
 Without Docker: `npm run build && npm start`.
 
-Health probes for your balancer or orchestrator:
-
-- `GET /health` — liveness (always cheap, never touches the database)
-- `GET /health/ready` — readiness (verifies the database is reachable; 503 if not)
+Point your balancer's health check at `/health`, and its readiness gate at
+`/health/ready` — see [API](#api).
 
 > `docker compose` has not been executed against a live daemon in this
 > environment, so treat the first run as unverified.
@@ -110,6 +108,18 @@ Health probes for your balancer or orchestrator:
 ## API
 
 Errors are always `{ "error": string, "code": string, "details"?: unknown }`.
+
+### Service — no auth
+
+| Method | Path            | Purpose                                              |
+| ------ | --------------- | ---------------------------------------------------- |
+| `GET`  | `/`             | Service banner: name, version and the probe paths    |
+| `GET`  | `/health`       | Liveness — never touches the database                |
+| `GET`  | `/health/ready` | Readiness — verifies the database; 503 when it is not reachable |
+
+The two probes are exempt from rate limiting so a load balancer can poll them
+freely. `/` is not — it is public and unauthenticated, and nothing needs to poll
+it.
 
 ### Public — no auth
 
@@ -198,7 +208,7 @@ back to a non-atomic capacity check.
 
 `.github/workflows/ci.yml` runs on Node 20 and 22: `npm ci`, typecheck, build,
 then `scripts/smoke-test.mjs`. That boots `dist/index.js` exactly as Hostinger
-does and asserts 20 behaviours needing no database: startup, login, role
+does and asserts 24 behaviours needing no database: startup, login, role
 separation, input validation, the content-table whitelist, CORS in both
 directions, and graceful shutdown.
 

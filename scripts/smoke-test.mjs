@@ -79,6 +79,17 @@ try {
   await waitForServer(server);
   console.log('[smoke] server is up\n');
 
+  // --- service root ---------------------------------------------------------
+  const root = await req('/');
+  check('GET / returns 200', root.status === 200, `got ${root.status}`);
+  check('GET / names the service', root.body?.service === 'foodiana-backend', `got ${root.body?.service}`);
+  check('GET / reports a version', typeof root.body?.version === 'string' && root.body.version.length > 0);
+  check(
+    'GET / links both health probes',
+    root.body?.health?.live === '/health' && root.body?.health?.ready === '/health/ready',
+    JSON.stringify(root.body?.health),
+  );
+
   // --- liveness -------------------------------------------------------------
   const health = await req('/health');
   check('GET /health returns 200', health.status === 200, `got ${health.status}`);
