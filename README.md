@@ -2,7 +2,7 @@
 
 Fastify + TypeScript JSON API for the Foodiana 2026 event: registration,
 ticketing, gate control and landing-page content. It owns the database schema and
-is the **only** holder of the Supabase service-role key.
+is the **only** thing that talks to the database.
 
 The web frontend lives in a separate repository and talks to this service over
 HTTP only — there is no shared code, and no build-time coupling in either
@@ -11,8 +11,8 @@ direction. The contract between them is this README's [API](#api) section plus
 
 | Path | What it is |
 | --- | --- |
-| `src/` | The service: routes, auth, validation, Supabase client |
-| `supabase/migrations/` | The database schema — this repo owns it |
+| `src/` | The service: routes, auth, validation, database access |
+| `src/migrations/` | The schema, applied automatically on boot |
 | `scripts/` | CI smoke test and live deployment verification |
 | `infra/nginx/` | Load balancer config for the VPS/Docker path |
 | `docs/` | [Hostinger deployment guide](docs/DEPLOY-HOSTINGER.md) |
@@ -26,9 +26,9 @@ direction. The contract between them is this README's [API](#api) section plus
                               ├────────▶│ API replica 3  ...       │
                               └────────▶│ API replica N  ...       │
                                         └────────────┬─────────────┘
-                                                     │ service-role key
+                                                     │ single DB user
                                                      ▼
-                                              Supabase Postgres
+                                                  MariaDB
 ```
 
 The browser holds **no database credentials**. Every read and write goes through
@@ -59,15 +59,18 @@ npm install
 
 # 2. Configure
 cp .env.example .env
-#    fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, ADMIN_PASSWORD
+#    fill in the DB_* settings, JWT_SECRET and ADMIN_PASSWORD
 #    generate a secret with:  openssl rand -base64 48
 
-# 3. Apply the database migrations (adds the gate functions, revokes anon access)
-supabase db push
+# 3. Start MariaDB (or point DB_HOST at one you already have)
+docker compose up -d db
 
-# 4. Run
+# 4. Run — migrations are applied automatically before it listens
 npm run dev          # http://localhost:4000
 ```
+
+There is no separate migrate step, and deliberately so: a forgotten one is what
+left the previous database completely empty while every deploy reported success.
 
 Point the frontend's `NEXT_PUBLIC_API_URL` at `http://localhost:4000`, and keep
 that origin listed in `CORS_ORIGINS` here (the default already allows
@@ -79,6 +82,7 @@ that origin listed in `CORS_ORIGINS` here (the default already allows
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run `dist/index.js` — exactly how Hostinger starts it |
 | `npm run typecheck` | Types only, no emit |
+| `npm test` | Database tests: migrations, charset, the gate under concurrency |
 | `npm run smoke` | Boot `dist/` and assert 28 end-to-end behaviours against the database |
 | `npm run verify:deployment` | Check a live deployment from the outside |
 
@@ -176,6 +180,12 @@ Admission returns `422 CAPACITY_FULL` when the venue is at capacity, and
 | `POST`   | `/api/admin/content/:table`       | Create a row                         |
 | `PATCH`  | `/api/admin/content/:table/:id`   | Update a row                         |
 | `DELETE` | `/api/admin/content/:table/:id`   | Delete a row                         |
+| `POST`   | `/api/admin/uploads`              | Upload an image, returns `{ url }`   |
+
+`POST /api/admin/uploads` takes one image (JPEG, PNG or WebP, up to 5 MB) and
+returns the URL to store in `image_url` / `logo_url`. The type is decided by the
+file's magic bytes, not the `Content-Type` the client claims. Uploads are served
+back from `/uploads/*`.
 
 `:table` is one of `guests`, `advisors`, `management_members`, `sponsors`,
 `brand_stalls`. Both the table names and every writable column are whitelisted in
@@ -185,24 +195,26 @@ not widen it elsewhere.
 
 ## Database
 
-Migrations live in `supabase/migrations` — this service owns the schema, since it
-is the sole database client. Run them with the Supabase CLI from the repository
-root.
+MariaDB. Migrations live in `src/migrations/` and are applied **on boot**, before
+the server accepts a request — if they fail the process exits rather than serving
+a half-migrated database.
 
-`20260818120000_backend_service_layer.sql` is the cutover migration. It:
+The schema is one initial migration rather than a history of increments: no
+database was ever built from the previous Supabase migrations, so there was only
+a final state to create.
 
-1. **Drops every `anon_*` RLS policy.** Previously anyone with the public anon key
-   could INSERT, UPDATE or DELETE any row — including marking their own ticket
-   paid or flipping their own `entry_status`. With RLS enabled and no policies,
-   `anon` and `authenticated` are denied everything; only `service_role` (which
-   bypasses RLS) can read or write.
-2. Adds `get_visitor_metrics()` so the dashboard's counts are one round trip.
-3. Adds `admit_visitor()` and `exit_visitor()`, the atomic gate operations.
-4. Adds indexes for the occupancy and payment-status counts the gate polls.
+Two details that are load-bearing:
 
-**Apply this migration before running the gate** — the scanner returns
-`503 MIGRATION_REQUIRED` if the RPCs are missing rather than silently falling
-back to a non-atomic capacity check.
+- **Every table is `utf8mb4` / `utf8mb4_unicode_ci`.** The `*_bn` columns hold
+  Bengali, and a `latin1` default corrupts them silently rather than failing.
+- **The gate's capacity ceiling is a row lock.** `admitVisitor` takes
+  `SELECT ... FOR UPDATE` on the `event_settings` singleton, which serialises
+  every concurrent admission. Without it, two gates scanning at once could both
+  pass a check at capacity − 1. `tests/gate-concurrency.test.mjs` fires 20
+  simultaneous admissions at the last free slot and asserts exactly one wins.
+
+There is no row-level security and none is needed: this service is the only
+database client, and the browser never holds a credential.
 
 ## CI/CD
 

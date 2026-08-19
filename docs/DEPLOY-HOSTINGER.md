@@ -82,8 +82,14 @@ NODE_ENV=production
 LOG_LEVEL=info
 TRUST_PROXY=true
 
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<service-role key>
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=<database user>
+DB_PASSWORD=<database password>
+DB_NAME=<database name>
+
+# MUST be outside the versioned build directory — see the warning below.
+UPLOAD_DIR=/home/<user>/domains/api.foodianafest.com/uploads
 
 JWT_SECRET=<openssl rand -base64 48>
 JWT_EXPIRES_IN=8h
@@ -112,18 +118,22 @@ Notes:
   File configuration"* if set. `package.json` already gives the preset what it
   needs: `main` and `start` both point at `dist/index.js`.
 
-### 3. Apply the database migrations
+### 3. Create the database
 
-The gate depends on Postgres functions added by
-`supabase/migrations/20260818120000_backend_service_layer.sql`. Hostinger does not
-run migrations, so do it once from your machine:
+hPanel -> **Databases** -> **MySQL Databases**. Create a database and a user with
+full rights on it, and put those values in `DB_NAME`, `DB_USER` and
+`DB_PASSWORD`. `DB_HOST` is `localhost`.
 
-```bash
-supabase db push
-```
+There is **no migration step**. The app applies its own migrations on boot,
+before it accepts a request, and exits rather than serving a half-migrated
+database. A forgotten manual migration is what left the previous database
+completely empty while every deploy reported success.
 
-Until that runs, the scanner returns `503 MIGRATION_REQUIRED` rather than falling
-back to a non-atomic capacity check.
+> **`UPLOAD_DIR` must point outside the app directory.** Hostinger deploys into
+> `.../hbuilds/versions/<uuid>/nodejs/` and creates a new version directory each
+> time, so anything written inside it is discarded by the next deploy. Uploaded
+> photos would work perfectly until then. The boot log prints the resolved
+> absolute path — check it after the first deploy.
 
 ### 4. Enable SSL
 
@@ -214,6 +224,7 @@ The one caveat is that the rate-limit counter is per process — point
 | `unable to determine transport target for "pino-pretty"` | `NODE_ENV` is not `production` on a production-only install. Set `NODE_ENV=production` (the code degrades to JSON logs rather than crashing). |
 | Build succeeds but the app will not start | An env var is missing — the log names each one. Check `NODE_ENV=production` is set. |
 | Site loads, every API call fails in the browser, `curl` works | `CORS_ORIGINS` is missing the site origin — check `www.`. |
-| Scanner returns `503 MIGRATION_REQUIRED` | `supabase db push` has not been run. |
+| App exits at boot with a migration error | The database is unreachable or the credentials are wrong. The log names the failure. |
+| Uploaded images disappear after a deploy | `UPLOAD_DIR` points inside the versioned build directory. Move it outside `.../hbuilds/versions/...` — the boot log prints the resolved path. |
 | Mixed-content errors | SSL not issued on `api.` yet. |
 | `429` during normal use | `RATE_LIMIT_MAX` is per process; raise it. |

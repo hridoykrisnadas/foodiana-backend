@@ -4,9 +4,9 @@
  * Verifies a live API deployment from the outside.
  *
  * Unlike the CI smoke test, this runs against real infrastructure, so it can
- * check the things that only fail in production: the service-role key actually
- * works, auth is switched on, CORS lists the real site origin, and — if a staff
- * password is supplied — that the gate migration has been applied.
+ * check the things that only fail in production: the database credentials
+ * actually work, auth is switched on, CORS lists the real site origin, and — if
+ * a staff password is supplied — that the schema is in place.
  *
  * The site is only ever used as a CORS origin here. Whether the frontend itself
  * is serving correctly is verified in the frontend repository.
@@ -74,7 +74,7 @@ if (health.status === 200 && health.json?.status === 'ok') {
 }
 
 // --- 2. API can reach the database -----------------------------------------
-// This is the check that catches a wrong or missing SUPABASE_SERVICE_ROLE_KEY.
+// This is the check that catches wrong or missing database credentials.
 const ready = await get(`${API_URL}/health/ready`);
 if (ready.status === 200) pass('API /health/ready — database reachable');
 else fail('API /health/ready — database unreachable', ready.json?.detail || `status ${ready.status}`);
@@ -136,7 +136,7 @@ if (ADMIN_PASSWORD) {
     if (metrics.status === 200 && typeof metrics.json?.metrics?.total === 'number') {
       pass(`admin metrics load — gate migration is applied (${metrics.json.metrics.total} visitors)`);
     } else if (metrics.json?.code === 'MIGRATION_REQUIRED') {
-      fail('gate migration is NOT applied', 'run: supabase db push');
+      fail('database schema is not applied', 'the boot migration failed — check the application logs');
     } else {
       fail('admin metrics', `status ${metrics.status} ${metrics.json?.error || ''}`);
     }

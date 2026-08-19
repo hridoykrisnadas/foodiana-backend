@@ -1,7 +1,7 @@
 name: Verify deployment
 
 # Checks the live API from the outside. This catches the failures CI cannot see:
-# a wrong SUPABASE_SERVICE_ROLE_KEY, an unapplied migration, or CORS that does
+# wrong database credentials, a failed boot migration, or CORS that does
 # not list the real site origin.
 #
 # Run it after Hostinger finishes deploying. The scheduled run is a light
