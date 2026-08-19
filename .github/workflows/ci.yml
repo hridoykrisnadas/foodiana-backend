@@ -84,7 +84,7 @@ jobs:
           ADMIN_PASSWORD: ci-only-admin-password
           LOG_LEVEL: silent
 
-      # Boots dist/index.js exactly as Hostinger will, then asserts 26
+      # Boots dist/index.js exactly as Hostinger will, then asserts 28
       # behaviours end to end against the MariaDB service container.
       - name: Smoke test
         run: node scripts/smoke-test.mjs

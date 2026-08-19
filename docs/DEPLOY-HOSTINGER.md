@@ -141,7 +141,7 @@ HTTPS, so the API must be too or the browser blocks every request as mixed conte
  │   npm ci                      │
  │   typecheck                   │
  │   build                       │
- │   smoke test (26 checks)      │
+ │   smoke test (28 checks)      │
  ├───────────────────────────────┤
  │ CI: Hostinger install sim     │
  │   npm ci --omit=dev → start   │

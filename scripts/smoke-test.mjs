@@ -174,6 +174,17 @@ try {
   });
   check('content CRUD rejects a non-whitelisted column', badColumn.status === 400, `got ${badColumn.status}`);
 
+  // --- uploads --------------------------------------------------------------
+  const uploadNoAuth = await req('/api/admin/uploads', { method: 'POST' });
+  check('upload rejects a missing token', uploadNoAuth.status === 401, `got ${uploadNoAuth.status}`);
+
+  const uploadNoFile = await req('/api/admin/uploads', { method: 'POST', headers: adminAuth });
+  check(
+    'upload rejects a request with no file',
+    uploadNoFile.status === 400 || uploadNoFile.status === 406,
+    `got ${uploadNoFile.status}`,
+  );
+
   // --- routing --------------------------------------------------------------
   const missing = await req('/api/does-not-exist');
   check('unknown route returns a structured 404', missing.status === 404 && missing.body?.code === 'ROUTE_NOT_FOUND');
