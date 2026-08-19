@@ -2,7 +2,7 @@
   "name": "foodiana-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Foodiana 2026 API — ticketing, gate control and content service",
+  "description": "Foodiana 2026 API \u2014 ticketing, gate control and content service",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
@@ -14,6 +14,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "node scripts/smoke-test.mjs",
+    "check:no-websocket": "node scripts/check-boots-without-websocket.mjs",
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "clean": "rm -rf dist"
   },

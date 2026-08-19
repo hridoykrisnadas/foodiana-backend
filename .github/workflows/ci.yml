@@ -59,6 +59,14 @@ jobs:
           CORS_ORIGINS: https://ci.example
           LOG_LEVEL: silent
 
+      # supabase-js builds a RealtimeClient inside createClient, which resolves a
+      # WebSocket constructor at construction time. On a runtime with no global
+      # WebSocket that threw on import and the API never listened — it reached
+      # production once. This asserts the invariant directly, on every Node
+      # version, rather than relying on the matrix to happen to cover it.
+      - name: Boots without a global WebSocket
+        run: npm run check:no-websocket
+
   deploy-simulation:
     name: Hostinger install simulation
     runs-on: ubuntu-latest
