@@ -206,7 +206,7 @@ back to a non-atomic capacity check.
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs on Node 20 and 22: `npm ci`, typecheck, build,
+`.github/workflows/ci.yml` runs on Node 22 and 24: `npm ci`, typecheck, build,
 then `scripts/smoke-test.mjs`. That boots `dist/index.js` exactly as Hostinger
 does and asserts 24 behaviours needing no database: startup, login, role
 separation, input validation, the content-table whitelist, CORS in both

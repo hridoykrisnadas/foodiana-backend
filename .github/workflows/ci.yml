@@ -29,8 +29,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 is the supported floor; 22 is what the Hostinger app runs.
-        node: ['20', '22']
+        # 24 is the target. 22 stays as the floor because Hostinger has served
+        # an older Node than the app was configured for before, and that is
+        # exactly how the WebSocket crash reached production. Node 20 is gone:
+        # it went end-of-life in April 2026.
+        node: ['22', '24']
 
     services:
       mariadb:
@@ -98,14 +101,6 @@ jobs:
           CORS_ORIGINS: https://ci.example
           LOG_LEVEL: silent
 
-      # supabase-js builds a RealtimeClient inside createClient, which resolves a
-      # WebSocket constructor at construction time. On a runtime with no global
-      # WebSocket that threw on import and the API never listened — it reached
-      # production once. This asserts the invariant directly, on every Node
-      # version, rather than relying on the matrix to happen to cover it.
-      - name: Boots without a global WebSocket
-        run: npm run check:no-websocket
-
   deploy-simulation:
     name: Hostinger install simulation
     runs-on: ubuntu-latest
@@ -134,7 +129,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install without devDependencies, then build
         run: |

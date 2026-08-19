@@ -72,7 +72,7 @@ hPanel → **Websites** → **Add Website** → **Deploy Web App** → GitHub.
 | Build command | `npm run build` (the preset's default) |
 | Output directory | leave blank |
 | Entry file | leave blank |
-| Node version | 22.x |
+| Node version | 24.x |
 | Domain | `api.your-domain.com` |
 
 Environment variables:
@@ -137,7 +137,7 @@ HTTPS, so the API must be too or the browser blocks every request as mixed conte
       │
       ▼
  ┌───────────────────────────────┐
- │ CI: build (node 20, 22)       │
+ │ CI: build (node 22, 24)       │
  │   npm ci                      │
  │   typecheck                   │
  │   build                       │
