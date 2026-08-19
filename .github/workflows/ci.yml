@@ -86,6 +86,13 @@ jobs:
 
       # Boots dist/index.js exactly as Hostinger will, then asserts 28
       # behaviours end to end against the MariaDB service container.
+      # An unreachable database must not take the whole API down. Exiting on a
+      # failed migration once made a production outage undiagnosable: the process
+      # died before listening, so the platform served its own blank 503 and the
+      # service could not be asked what was wrong.
+      - name: Serves without a database
+        run: npm run check:no-database
+
       - name: Smoke test
         run: node scripts/smoke-test.mjs
         env:

@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test tests/*.test.mjs",
     "smoke": "node scripts/smoke-test.mjs",
+    "check:no-database": "node scripts/check-serves-without-database.mjs",
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "clean": "rm -rf dist"
   },

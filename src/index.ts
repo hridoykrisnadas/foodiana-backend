@@ -1,5 +1,6 @@
 import { buildServer } from './server.js';
 import { runMigrations } from './db/migrate.js';
+import { recordMigrationFailure } from './db/startup.js';
 import { env } from './lib/env.js';
 
 /**
@@ -34,15 +35,22 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  // Apply pending migrations before accepting a single request. A half-migrated
-  // database must never serve traffic: failing to start is loud and visible in
-  // the platform's logs, whereas serving wrong data is neither.
+  // Apply pending migrations before accepting requests.
+  //
+  // A failure here is recorded rather than fatal. Exiting made an outage
+  // impossible to diagnose from outside: the process died before it listened, so
+  // /health and / were unreachable and the platform served its own blank 503.
+  // Now the service stays up and says what is wrong on /health/ready, while the
+  // database itself still refuses any query against a table that is not there.
   try {
     const applied = await runMigrations(app.log);
     app.log.info({ applied: applied.length }, 'database migrations up to date');
   } catch (error) {
-    app.log.error({ err: error }, 'migrations failed — refusing to serve');
-    process.exit(1);
+    recordMigrationFailure(error);
+    app.log.error(
+      { err: error },
+      'MIGRATIONS FAILED — serving liveness only. Check DB_HOST/DB_USER/DB_PASSWORD/DB_NAME; /health/ready reports the detail',
+    );
   }
 
   try {

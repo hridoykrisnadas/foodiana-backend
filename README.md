@@ -83,6 +83,7 @@ that origin listed in `CORS_ORIGINS` here (the default already allows
 | `npm start` | Run `dist/index.js` — exactly how Hostinger starts it |
 | `npm run typecheck` | Types only, no emit |
 | `npm test` | Database tests: migrations, charset, the gate under concurrency |
+| `npm run check:no-database` | Assert the API still serves liveness with the database down |
 | `npm run smoke` | Boot `dist/` and assert 28 end-to-end behaviours against the database |
 | `npm run verify:deployment` | Check a live deployment from the outside |
 
@@ -119,11 +120,19 @@ Errors are always `{ "error": string, "code": string, "details"?: unknown }`.
 | ------ | --------------- | ---------------------------------------------------- |
 | `GET`  | `/`             | Service banner: name, version and the probe paths    |
 | `GET`  | `/health`       | Liveness — never touches the database                |
-| `GET`  | `/health/ready` | Readiness — verifies the database; 503 when it is not reachable |
+| `GET`  | `/health/ready` | Readiness — 503 with a `detail` and `hint` when the database is unreachable or the boot migration failed |
 
 The two probes are exempt from rate limiting so a load balancer can poll them
 freely. `/` is not — it is public and unauthenticated, and nothing needs to poll
 it.
+
+**Liveness always answers.** If the database is unreachable the service still
+starts and serves `/` and `/health`, and reports the specific failure on
+`/health/ready`. It used to exit instead, which made an outage impossible to
+diagnose from outside: the process died before it listened, so the platform
+served its own blank 503 and the API was indistinguishable from a crashed
+process, a DNS problem or an expired certificate. `npm run check:no-database`
+guards this.
 
 ### Public — no auth
 

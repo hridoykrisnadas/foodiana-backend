@@ -126,18 +126,29 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   // Logging the resolved absolute path is what makes a misconfigured UPLOAD_DIR
   // visible now rather than after the next deploy has discarded every image.
-  await ensureUploadDir();
-  app.log.info({ uploadDir }, 'serving uploads from this absolute path');
+  //
+  // A directory that cannot be created must not take the whole API down with it.
+  // Photos are a content-management convenience; the gate is not. If this fails,
+  // uploads and /uploads/* stop working and everything else carries on.
+  try {
+    await ensureUploadDir();
+    app.log.info({ uploadDir }, 'serving uploads from this absolute path');
 
-  await app.register(fastifyStatic, {
-    root: uploadDir,
-    prefix: '/uploads/',
-    index: false,
-    list: false,
-    // Filenames are random and immutable, so they can be cached hard.
-    cacheControl: true,
-    maxAge: '30d',
-  });
+    await app.register(fastifyStatic, {
+      root: uploadDir,
+      prefix: '/uploads/',
+      index: false,
+      list: false,
+      // Filenames are random and immutable, so they can be cached hard.
+      cacheControl: true,
+      maxAge: '30d',
+    });
+  } catch (error) {
+    app.log.error(
+      { err: error, uploadDir },
+      'could not prepare UPLOAD_DIR — uploads are disabled, the rest of the API is unaffected',
+    );
+  }
 
   await app.register(rootRoutes);
   await app.register(healthRoutes);
