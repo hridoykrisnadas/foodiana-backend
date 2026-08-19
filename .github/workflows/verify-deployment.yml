@@ -1,0 +1,69 @@
+name: Verify deployment
+
+# Checks the live API from the outside. This catches the failures CI cannot see:
+# a wrong SUPABASE_SERVICE_ROLE_KEY, an unapplied migration, or CORS that does
+# not list the real site origin.
+#
+# Run it after Hostinger finishes deploying. The scheduled run is a light
+# heartbeat — a dedicated uptime monitor is better if you need tight alerting.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API base URL (defaults to the PRODUCTION_API_URL variable)'
+        required: false
+        type: string
+      site_url:
+        description: 'Site origin to assert CORS allows (defaults to the PRODUCTION_SITE_URL variable)'
+        required: false
+        type: string
+  schedule:
+    # Every 6 hours. Tighten before the event, or delete this block entirely.
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Check the live API
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve targets
+        id: targets
+        run: |
+          API_URL="${{ inputs.api_url || vars.PRODUCTION_API_URL }}"
+          SITE_URL="${{ inputs.site_url || vars.PRODUCTION_SITE_URL }}"
+          if [ -z "$API_URL" ]; then
+            echo "::error::No API URL. Set the PRODUCTION_API_URL repository variable (Settings -> Secrets and variables -> Actions -> Variables) or pass api_url when dispatching."
+            exit 1
+          fi
+          echo "api_url=$API_URL"   >> "$GITHUB_OUTPUT"
+          echo "site_url=$SITE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify
+        env:
+          API_URL: ${{ steps.targets.outputs.api_url }}
+          SITE_URL: ${{ steps.targets.outputs.site_url }}
+          # Optional. When set, the run also proves the gate migration is applied.
+          ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+        run: node scripts/verify-deployment.mjs
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deployment verification"
+            echo ""
+            echo "- API:  \`${{ steps.targets.outputs.api_url }}\`"
+            echo "- Site origin: \`${{ steps.targets.outputs.site_url || 'not set' }}\`"
+            echo "- Result: **${{ job.status }}**"
+          } >> "$GITHUB_STEP_SUMMARY"

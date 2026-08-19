@@ -1,0 +1,137 @@
+name: CI
+
+# The API is the whole repository, so package.json sits at the root — which is
+# what a Hostinger Node.js app expects. On green, the `promote` job fast-forwards
+# the `production` branch to the verified commit; Hostinger deploys from that
+# branch, so a failing build cannot reach production.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the supported floor; 22 is what the Hostinger app runs.
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # Boots dist/index.js exactly as Hostinger will, then asserts 20
+      # behaviours that need no database.
+      - name: Smoke test
+        run: node scripts/smoke-test.mjs
+        env:
+          SUPABASE_URL: https://ci-placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
+          ADMIN_PASSWORD: ci-only-admin-password
+          AGENT_PASSWORD: ci-only-agent-password
+          CORS_ORIGINS: https://ci.example
+          LOG_LEVEL: silent
+
+  deploy-simulation:
+    name: Hostinger install simulation
+    runs-on: ubuntu-latest
+
+    # Hostinger installs production dependencies only, which is how
+    # `sh: tsc: command not found` reached a real deploy: typescript was a
+    # devDependency, so it was never on disk when the build ran. This job
+    # reproduces that install so the same mistake fails here instead of there.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install without devDependencies, then build
+        run: |
+          npm ci --omit=dev
+          npm run build
+          test -f dist/index.js || { echo "::error::build produced no dist/index.js"; exit 1; }
+
+      - name: Start the way the Fastify preset does (npm start)
+        env:
+          SUPABASE_URL: https://ci-placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
+          ADMIN_PASSWORD: ci-only-admin-password
+          NODE_ENV: production
+          PORT: '4600'
+          LOG_LEVEL: silent
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4600/health >/dev/null 2>&1; then
+              echo "started: $(curl -s http://127.0.0.1:4600/health)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the API did not start from a production-only install"
+          exit 1
+
+  promote:
+    name: Promote main to production
+    runs-on: ubuntu-latest
+    needs: [build, deploy-simulation]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The Hostinger API app deploys from `production`. Only this job advances
+      # that branch, so a failing build cannot reach production. `production` is a
+      # deploy pointer — never commit to it directly.
+      - name: Fast-forward production to the verified commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "Promoting ${GITHUB_SHA} to production"
+          git push origin "${GITHUB_SHA}:refs/heads/production" --force
+
+      - name: Summary
+        run: |
+          {
+            echo "### Promoted to production"
+            echo ""
+            echo "Commit \`${GITHUB_SHA}\` passed CI and was pushed to \`production\`."
+            echo "Hostinger redeploys the API from that branch."
+            echo ""
+            echo "Then run the **Verify deployment** workflow."
+          } >> "$GITHUB_STEP_SUMMARY"

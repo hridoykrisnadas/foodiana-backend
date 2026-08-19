@@ -1,0 +1,57 @@
+# Backend cluster for load testing and production-shaped local runs.
+#
+#   docker compose up --build --scale backend=3
+#
+# nginx listens on :4000 and round-robins across the backend replicas, so a
+# client's API base URL stays http://localhost:4000 no matter how many replicas
+# are running.
+#
+# Scaling is purely by replica count. The API runs one process per container on
+# purpose: a managed host's framework preset owns how the app starts, so keeping
+# the process shape plain is what lets the same image and the same entry point run
+# on Hostinger and here without special-casing either.
+
+services:
+  backend:
+    build:
+      context: .
+    # No host port published: traffic arrives via the load balancer only. This
+    # also lets --scale create more than one replica without port collisions.
+    expose:
+      - '4000'
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      TRUST_PROXY: 'true'
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set SUPABASE_SERVICE_ROLE_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      AGENT_PASSWORD: ${AGENT_PASSWORD:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      REGISTER_RATE_LIMIT_MAX: ${REGISTER_RATE_LIMIT_MAX:-10}
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4000/health']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  lb:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend
+    ports:
+      - '${API_PORT:-4000}:4000'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1:4000/health']
+      interval: 15s
+      timeout: 3s
+      retries: 3

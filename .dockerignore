@@ -5,6 +5,12 @@ dist
 !.env.example
 *.log
 .git
+.github
 supabase
+scripts
+infra
+docs
+docker-compose.yml
+README.md
 Dockerfile
 .dockerignore
