@@ -7,7 +7,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Feature branches run the full suite too. The database tests need a MariaDB
+    # service container, which is the only place they can run when a developer
+    # has no local container runtime.
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
