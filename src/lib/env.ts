@@ -46,8 +46,8 @@ if (!parsed.success) {
   const details = parsed.error.issues
     .map((issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`)
     .join('\n');
-  console.error(`\nInvalid backend environment configuration:\n${details}\n`);
-  console.error('Copy backend/.env.example to backend/.env and fill in the values.\n');
+  console.error(`\nInvalid environment configuration:\n${details}\n`);
+  console.error('Copy .env.example to .env and fill in the values.\n');
   process.exit(1);
 }
 
