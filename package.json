@@ -2,7 +2,7 @@
   "name": "foodiana-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Foodiana 2026 API \u2014 ticketing, gate control and content service",
+  "description": "Foodiana 2026 API — ticketing, gate control and content service",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
@@ -27,6 +27,8 @@
     "@types/node": "^26.2.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.0",
+    "kysely": "^0.29.5",
+    "mysql2": "^3.23.3",
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
   },

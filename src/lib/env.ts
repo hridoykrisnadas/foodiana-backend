@@ -14,8 +14,27 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
 
-  SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20, 'SUPABASE_SERVICE_ROLE_KEY looks too short'),
+  /**
+   * TEMPORARY, removed once src/db/supabase.ts is deleted. They are kept only so
+   * that file still compiles while the routes are ported table by table. Neither
+   * is required any more, so a deployment can already drop them.
+   */
+  SUPABASE_URL: z.string().default('https://unused.invalid'),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default('unused-during-migration'),
+
+  DB_HOST: z.string().min(1, 'DB_HOST is required'),
+  DB_PORT: z.coerce.number().int().min(1).max(65535).default(3306),
+  DB_USER: z.string().min(1, 'DB_USER is required'),
+  DB_PASSWORD: z.string().default(''),
+  DB_NAME: z.string().min(1, 'DB_NAME is required'),
+  DB_POOL_SIZE: z.coerce.number().int().min(1).max(100).default(10),
+
+  /**
+   * Absolute path for uploaded photos. On Hostinger this MUST be outside the
+   * versioned build directory (.../hbuilds/versions/<uuid>/nodejs/) or every
+   * deploy silently discards every uploaded image.
+   */
+  UPLOAD_DIR: z.string().min(1).default('./uploads'),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_EXPIRES_IN: z.string().default('8h'),

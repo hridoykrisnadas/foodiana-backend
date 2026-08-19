@@ -28,6 +28,21 @@ jobs:
       matrix:
         # 20 is the supported floor; 22 is what the Hostinger app runs.
         node: ['20', '22']
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: foodiana_test
+          MARIADB_USER: foodiana
+          MARIADB_PASSWORD: foodiana
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -51,8 +66,12 @@ jobs:
       - name: Smoke test
         run: node scripts/smoke-test.mjs
         env:
-          SUPABASE_URL: https://ci-placeholder.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
           JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
           ADMIN_PASSWORD: ci-only-admin-password
           AGENT_PASSWORD: ci-only-agent-password
@@ -75,6 +94,21 @@ jobs:
     # `sh: tsc: command not found` reached a real deploy: typescript was a
     # devDependency, so it was never on disk when the build ran. This job
     # reproduces that install so the same mistake fails here instead of there.
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: foodiana_test
+          MARIADB_USER: foodiana
+          MARIADB_PASSWORD: foodiana
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -90,8 +124,12 @@ jobs:
 
       - name: Start the way the Fastify preset does (npm start)
         env:
-          SUPABASE_URL: https://ci-placeholder.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key-not-real
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
           JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
           ADMIN_PASSWORD: ci-only-admin-password
           NODE_ENV: production
