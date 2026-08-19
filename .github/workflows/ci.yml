@@ -64,7 +64,19 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Boots dist/index.js exactly as Hostinger will, then asserts 20
+      # The database tests: migrations, charset round-trip, and the gate's
+      # capacity ceiling under concurrent admissions.
+      - name: Test
+        run: npm test
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: foodiana
+          DB_PASSWORD: foodiana
+          DB_NAME: foodiana_test
+          UPLOAD_DIR: /tmp/foodiana-uploads
+
+      # Boots dist/index.js exactly as Hostinger will, then asserts 24
       # behaviours that need no database.
       - name: Smoke test
         run: node scripts/smoke-test.mjs
