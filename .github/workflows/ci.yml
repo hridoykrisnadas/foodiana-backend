@@ -75,6 +75,11 @@ jobs:
           DB_PASSWORD: foodiana
           DB_NAME: foodiana_test
           UPLOAD_DIR: /tmp/foodiana-uploads
+          # env.ts validates the whole schema on import, and the tests import the
+          # db client, so the auth settings have to be present here too.
+          JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
+          ADMIN_PASSWORD: ci-only-admin-password
+          LOG_LEVEL: silent
 
       # Boots dist/index.js exactly as Hostinger will, then asserts 24
       # behaviours that need no database.
