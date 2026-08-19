@@ -73,9 +73,9 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(rateLimit, {
     max: env.RATE_LIMIT_MAX,
     timeWindow: env.RATE_LIMIT_WINDOW,
-    // NOTE: this counter is per replica, held in memory. With N replicas the
+    // NOTE: this counter is per instance, held in memory. With N instances the
     // effective ceiling is N x RATE_LIMIT_MAX. Point it at a shared Redis store
-    // (`redis` option) when you need one global budget across the cluster.
+    // (`redis` option) when you need one global budget across all instances.
   });
 
   await app.register(jwt, {

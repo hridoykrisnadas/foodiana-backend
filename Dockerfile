@@ -20,12 +20,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=4000
-# One worker per core inside the container. Set to 1 when the orchestrator
-# scales by replica instead.
-ENV CLUSTER_WORKERS=0
 
-# dumb-init reaps zombies and forwards SIGTERM to the cluster primary so
-# graceful shutdown actually works.
+# dumb-init reaps zombies and forwards SIGTERM to node so graceful shutdown
+# actually works. Scale by running more containers, not more processes per
+# container — the API is stateless.
 RUN apk add --no-cache dumb-init curl
 
 COPY --from=build /app/node_modules ./node_modules

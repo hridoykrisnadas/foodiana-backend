@@ -14,9 +14,6 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
 
-  /** 0 = one worker per CPU core. 1 = single process (no clustering). */
-  CLUSTER_WORKERS: z.coerce.number().int().min(0).default(0),
-
   SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20, 'SUPABASE_SERVICE_ROLE_KEY looks too short'),
 
