@@ -1,8 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { db, unwrap } from '../db/supabase.js';
+import { db } from '../db/client.js';
+import { admitVisitor, exitVisitor } from '../db/gate.js';
+import type { ContentTableName } from '../db/schema.js';
 import { requireRole } from '../lib/auth.js';
-import { notFound, upstream } from '../lib/errors.js';
+import { notFound } from '../lib/errors.js';
 import {
   fetchGroundCapacity,
   fetchVisitorMetrics,
@@ -54,9 +57,9 @@ const contentParamSchema = z.object({
 
 const contentItemParamSchema = contentParamSchema.extend({ id: z.uuid() });
 
-/** Escape the PostgREST `or`/`ilike` metacharacters in a user-supplied search term. */
-function escapeSearchTerm(term: string): string {
-  return term.replace(/[%_,()\\]/g, (match) => `\\${match}`);
+/** Escape the LIKE wildcards in a user-supplied search term. */
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
 /**
@@ -76,43 +79,45 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   app.get('/visitors', async (request) => {
     const { filter, search, page, pageSize } = parseBody(visitorQuerySchema, request.query);
 
-    let query = db
-      .from('visitors')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(page * pageSize, page * pageSize + pageSize - 1);
+    let base = db.selectFrom('visitors');
 
-    if (filter === 'paid') query = query.eq('payment_status', 'Paid');
-    else if (filter === 'pending') query = query.eq('payment_status', 'Pending');
-    else if (filter === 'entered') query = query.eq('entry_status', true);
-    else if (filter === 'inside') query = query.eq('entry_status', true).eq('exited_status', false);
-    else if (filter === 'exited') query = query.eq('exited_status', true);
+    if (filter === 'paid') base = base.where('payment_status', '=', 'Paid');
+    else if (filter === 'pending') base = base.where('payment_status', '=', 'Pending');
+    else if (filter === 'entered') base = base.where('entry_status', '=', true);
+    else if (filter === 'inside') {
+      base = base.where('entry_status', '=', true).where('exited_status', '=', false);
+    } else if (filter === 'exited') base = base.where('exited_status', '=', true);
 
     if (search) {
-      const term = escapeSearchTerm(search);
-      query = query.or(
-        `name.ilike.%${term}%,mobile.ilike.%${term}%,email.ilike.%${term}%,qr_code_id.ilike.%${term}%`,
+      const term = `%${escapeLike(search)}%`;
+      base = base.where((eb) =>
+        eb.or([
+          eb('name', 'like', term),
+          eb('mobile', 'like', term),
+          eb('email', 'like', term),
+          eb('qr_code_id', 'like', term),
+        ]),
       );
     }
 
-    const { data, error, count } = await query;
-    if (error) throw upstream('load visitors failed', { message: error.message });
+    // MariaDB has no count-alongside-rows, so the total is its own query.
+    const [visitors, counted] = await Promise.all([
+      base.selectAll().orderBy('created_at', 'desc').limit(pageSize).offset(page * pageSize).execute(),
+      base.select((eb) => eb.fn.countAll().as('total')).executeTakeFirstOrThrow(),
+    ]);
 
-    return { visitors: data ?? [], total: count ?? 0, page, pageSize };
+    return { visitors, total: Number(counted.total), page, pageSize };
   });
 
   /** Mark a pending registration as paid without admitting them. */
   app.patch('/visitors/:id/payment', async (request) => {
     const { id } = parseBody(idParamSchema, request.params);
-    const visitor = unwrap(
-      await db
-        .from('visitors')
-        .update({ payment_status: 'Paid' })
-        .eq('id', id)
-        .select('*')
-        .maybeSingle(),
-      'mark visitor paid',
-    );
+    await db.updateTable('visitors').set({ payment_status: 'Paid' }).where('id', '=', id).execute();
+    const visitor = await db
+      .selectFrom('visitors')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
     if (!visitor) throw notFound('Visitor not found');
     request.log.info({ visitorId: id }, 'visitor marked paid from dashboard');
     return { visitor };
@@ -124,13 +129,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
    */
   app.patch('/visitors/:id/entry', async (request) => {
     const { id } = parseBody(idParamSchema, request.params);
-    const { data, error } = await db.rpc('admit_visitor', {
-      p_visitor_id: id,
-      p_payment_method: null,
-    });
-    if (error) throw upstream('admit_visitor failed', { message: error.message });
-
-    const outcome = data as { status: string; visitor?: unknown; inside_now?: number; capacity?: number };
+    const outcome = await admitVisitor(id, null);
     if (outcome.status === 'not_found') throw notFound('Visitor not found');
 
     return {
@@ -143,10 +142,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   /** Manual exit from the dashboard. */
   app.patch('/visitors/:id/exit', async (request) => {
     const { id } = parseBody(idParamSchema, request.params);
-    const { data, error } = await db.rpc('exit_visitor', { p_visitor_id: id });
-    if (error) throw upstream('exit_visitor failed', { message: error.message });
-
-    const outcome = data as { status: string; visitor?: unknown; inside_now?: number; capacity?: number };
+    const outcome = await exitVisitor(id);
     if (outcome.status === 'not_found') throw notFound('Visitor not found');
 
     return {
@@ -158,14 +154,15 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   /** Paid visitors, oldest first — the pool the raffle draw prints from. */
   app.get('/raffle', async () => {
-    const visitors = unwrap(
-      await db
-        .from('visitors')
-        .select('id, qr_code_id, name, mobile, email, profession, ticket_price, includes_concert, created_at')
-        .eq('payment_status', 'Paid')
-        .order('created_at', { ascending: true }),
-      'load raffle entrants',
-    );
+    const visitors = await db
+      .selectFrom('visitors')
+      .select([
+        'id', 'qr_code_id', 'name', 'mobile', 'email',
+        'profession', 'ticket_price', 'includes_concert', 'created_at',
+      ])
+      .where('payment_status', '=', 'Paid')
+      .orderBy('created_at', 'asc')
+      .execute();
     return { visitors, total: visitors.length };
   });
 
@@ -173,65 +170,62 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   /** All tiers including inactive ones. */
   app.get('/ticket-tiers', async () => ({
-    tiers: unwrap(
-      await db.from('ticket_tiers').select('*').order('display_order', { ascending: true }),
-      'load ticket tiers',
-    ),
+    tiers: await db.selectFrom('ticket_tiers').selectAll().orderBy('display_order', 'asc').execute(),
   }));
 
   app.post('/ticket-tiers', async (request, reply) => {
     const payload = parseBody(tierSchema, request.body);
-    const tier = unwrap(
-      await db.from('ticket_tiers').insert(payload).select('*').single(),
-      'create ticket tier',
-    );
+    const id = randomUUID();
+    await db.insertInto('ticket_tiers').values({ id, ...payload }).execute();
+    const tier = await db
+      .selectFrom('ticket_tiers')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow();
     return reply.code(201).send({ tier });
   });
 
   app.patch('/ticket-tiers/:id', async (request) => {
     const { id } = parseBody(idParamSchema, request.params);
     const payload = parseBody(tierSchema.partial(), request.body);
-    const tier = unwrap(
-      await db.from('ticket_tiers').update(payload).eq('id', id).select('*').maybeSingle(),
-      'update ticket tier',
-    );
+    await db.updateTable('ticket_tiers').set(payload).where('id', '=', id).execute();
+    const tier = await db
+      .selectFrom('ticket_tiers')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
     if (!tier) throw notFound('Ticket tier not found');
     return { tier };
   });
 
   app.delete('/ticket-tiers/:id', async (request, reply) => {
     const { id } = parseBody(idParamSchema, request.params);
-    const { error } = await db.from('ticket_tiers').delete().eq('id', id);
-    if (error) {
-      throw upstream('delete ticket tier failed', { code: error.code, message: error.message });
-    }
+    await db.deleteFrom('ticket_tiers').where('id', '=', id).execute();
     return reply.code(204).send();
   });
 
   // ---- Event settings -----------------------------------------------------
 
   app.get('/event-settings', async () => ({
-    settings: unwrap(
-      await db
-        .from('event_settings')
-        .select('event_date, event_end_date, ground_capacity, updated_at')
-        .eq('id', 1)
-        .maybeSingle(),
-      'load event settings',
-    ),
+    settings: await db
+      .selectFrom('event_settings')
+      .select(['event_date', 'event_end_date', 'ground_capacity', 'updated_at'])
+      .where('id', '=', 1)
+      .executeTakeFirst(),
   }));
 
   app.patch('/event-settings', async (request) => {
     const payload = parseBody(eventSettingsSchema, request.body);
-    const settings = unwrap(
-      await db
-        .from('event_settings')
-        .update({ ...payload, updated_at: new Date().toISOString() })
-        .eq('id', 1)
-        .select('event_date, event_end_date, ground_capacity, updated_at')
-        .maybeSingle(),
-      'update event settings',
-    );
+    await db
+      .updateTable('event_settings')
+      .set({ ...payload, updated_at: new Date() })
+      .where('id', '=', 1)
+      .execute();
+    const settings = await db
+      .selectFrom('event_settings')
+      .select(['event_date', 'event_end_date', 'ground_capacity', 'updated_at'])
+      .where('id', '=', 1)
+      .executeTakeFirst();
     if (!settings) throw notFound('Event settings row (id=1) is missing');
     return { settings };
   });
@@ -243,10 +237,11 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     const { table } = parseBody(contentParamSchema, request.params);
     const entry = resolveContentTable(table);
     return {
-      items: unwrap(
-        await db.from(entry.table).select('*').order('display_order', { ascending: true }),
-        `load ${entry.table}`,
-      ),
+      items: await db
+        .selectFrom(entry.table as ContentTableName)
+        .selectAll()
+        .orderBy('display_order', 'asc')
+        .execute(),
     };
   });
 
@@ -258,32 +253,38 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       (request.body ?? {}) as Record<string, unknown>,
       { partial: false },
     );
+    const name = entry.table as ContentTableName;
 
     // Append to the end of the list unless the client picked a position.
     if (payload.display_order === undefined) {
-      const { count } = await db.from(entry.table).select('*', { count: 'exact', head: true });
-      payload.display_order = (count ?? 0) + 1;
+      const { count } = await db
+        .selectFrom(name)
+        .select((eb) => eb.fn.countAll().as('count'))
+        .executeTakeFirstOrThrow();
+      payload.display_order = Number(count) + 1;
     }
 
-    const item = unwrap(
-      await db.from(entry.table).insert(payload).select('*').single(),
-      `create ${entry.table} row`,
-    );
+    const id = randomUUID();
+    await db.insertInto(name).values({ id, ...payload } as never).execute();
+    const item = await db
+      .selectFrom(name)
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow();
     return reply.code(201).send({ item });
   });
 
   app.patch('/content/:table/:id', async (request) => {
     const { table, id } = parseBody(contentItemParamSchema, request.params);
     const entry = resolveContentTable(table);
+    const name = entry.table as ContentTableName;
     const payload = sanitizeContentPayload(
       entry,
       (request.body ?? {}) as Record<string, unknown>,
       { partial: true },
     );
-    const item = unwrap(
-      await db.from(entry.table).update(payload).eq('id', id).select('*').maybeSingle(),
-      `update ${entry.table} row`,
-    );
+    await db.updateTable(name).set(payload as never).where('id', '=', id).execute();
+    const item = await db.selectFrom(name).selectAll().where('id', '=', id).executeTakeFirst();
     if (!item) throw notFound(`No ${entry.table} row with id ${id}`);
     return { item };
   });
@@ -291,13 +292,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   app.delete('/content/:table/:id', async (request, reply) => {
     const { table, id } = parseBody(contentItemParamSchema, request.params);
     const entry = resolveContentTable(table);
-    const { error } = await db.from(entry.table).delete().eq('id', id);
-    if (error) {
-      throw upstream(`delete ${entry.table} row failed`, {
-        code: error.code,
-        message: error.message,
-      });
-    }
+    await db.deleteFrom(entry.table as ContentTableName).where('id', '=', id).execute();
     return reply.code(204).send();
   });
 };

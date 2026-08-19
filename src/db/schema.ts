@@ -36,7 +36,9 @@ export interface EventSettingsTable {
   event_date: DateOnly;
   event_end_date: DateOnly | null;
   ground_capacity: number;
-  updated_at: Generated<Timestamp>;
+  // Not Generated<>: this column is written explicitly on every settings update,
+  // and Timestamp's insert side already permits undefined so inserts can omit it.
+  updated_at: Timestamp;
 }
 
 export interface TicketTiersTable {
