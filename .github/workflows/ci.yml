@@ -84,8 +84,8 @@ jobs:
           ADMIN_PASSWORD: ci-only-admin-password
           LOG_LEVEL: silent
 
-      # Boots dist/index.js exactly as Hostinger will, then asserts 24
-      # behaviours that need no database.
+      # Boots dist/index.js exactly as Hostinger will, then asserts 26
+      # behaviours end to end against the MariaDB service container.
       - name: Smoke test
         run: node scripts/smoke-test.mjs
         env:

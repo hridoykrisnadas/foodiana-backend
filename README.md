@@ -79,7 +79,7 @@ that origin listed in `CORS_ORIGINS` here (the default already allows
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run `dist/index.js` — exactly how Hostinger starts it |
 | `npm run typecheck` | Types only, no emit |
-| `npm run smoke` | Boot `dist/` and assert 24 behaviours needing no database |
+| `npm run smoke` | Boot `dist/` and assert 26 end-to-end behaviours against the database |
 | `npm run verify:deployment` | Check a live deployment from the outside |
 
 ## Running as a cluster
@@ -208,7 +208,7 @@ back to a non-atomic capacity check.
 
 `.github/workflows/ci.yml` runs on Node 22 and 24: `npm ci`, typecheck, build,
 then `scripts/smoke-test.mjs`. That boots `dist/index.js` exactly as Hostinger
-does and asserts 24 behaviours needing no database: startup, login, role
+does and asserts 26 behaviours end to end: startup, login, role
 separation, input validation, the content-table whitelist, CORS in both
 directions, and graceful shutdown.
 
